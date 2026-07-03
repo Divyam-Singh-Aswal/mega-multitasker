@@ -59,15 +59,17 @@ The ESP32 built-in libraries (WiFi, WebServer, BLEDevice, BLEScan, HTTPClient) a
 
 The Mega runs at 5V logic. Both ESP32 modules run at 3.3V. An I2C Bi-Directional Logic Level Converter (4-channel) is used to safely shift signals between the two voltage domains.
 
-|----------------------|
-Mega 5V  --------|HV          LV|-------- ESP32 3.3V
-Mega GND --------|GND        GND|-------- ESP32 GND
-Mega TX2 (D16) --|HV1        LV1|-------- ESP32 RX2 (GPIO16)
-|HV2        LV2|
-|HV3        LV3|
-|HV4        LV4|
-|----------------------|
-ESP32 TX2 (GPIO17) ──────────────────────> Mega RX2 (D17)  [direct, no shifting needed]
+### Level Shifter Connections
+
+| Direction | Mega Pin | Level Shifter | ESP32 Pin | Notes |
+|-----------|----------|---------------|-----------|-------|
+| Power | 5V | HV | — | Mega side high voltage |
+| Power | GND | GND | GND | Common ground |
+| Data | D16 (TX2) | HV1 → LV1 | GPIO16 (RX2) | 5V → 3.3V shifted |
+| Data | D17 (RX2) | — | GPIO17 (TX2) | Direct, no shift needed |
+| Power | — | LV | 3.3V | ESP32 side low voltage |
+
+**Key point:** Only shift Mega TX → ESP32 RX. The reverse direction works directly.
 
 Only the Mega TX → ESP32 RX direction requires level shifting (5V down to 3.3V). The ESP32 TX → Mega RX direction (3.3V into a 5V-tolerant Mega pin) is connected directly without a shifter.
 
