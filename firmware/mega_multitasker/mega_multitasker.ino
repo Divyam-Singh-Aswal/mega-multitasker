@@ -2779,23 +2779,21 @@ void handleProtocol(const char* raw) {
 
     // TTT:LEFT  opponent left game or cancelled
     if (payload == "LEFT") {
-        if (currentMode == TTT_ONLINE_REQUEST){
-        tttOnlineState  = ONLINE_IDLE;
-        tttShowWarning  = false;
-        tttOver         = false;
-        tttMySymbol     = ' ';
-        tttP1Symbol     = ' ';
-        tttP2Symbol     = ' ';
-        for (uint8_t i = 0; i < 9; i++) tttBoard[i] = 0;
-        // show left message on request screen
-        tttShowLeftMsg   = true;
-        tttLeftMsgTimer  = millis();
-        navDepth = 0;
-        navHistory[navDepth++] = HOME;
-        navHistory[navDepth++] = TTT_MODE_SELECT;
-        currentMode = TTT_ONLINE_REQUEST;
-        drawScreen();
-        }
+      // handle LEFT regardless of which screen we're on
+      tttOnlineState  = ONLINE_IDLE;
+      tttShowWarning  = false;
+      tttOver         = false;
+      tttMySymbol     = ' ';
+      tttP1Symbol     = ' ';
+      tttP2Symbol     = ' ';
+      for (uint8_t i = 0; i < 9; i++) tttBoard[i] = 0;
+      tttShowLeftMsg   = true;
+      tttLeftMsgTimer  = millis();
+      navDepth = 0;
+      navHistory[navDepth++] = HOME;
+      navHistory[navDepth++] = TTT_MODE_SELECT;
+      currentMode = TTT_ONLINE_REQUEST;
+      drawScreen();
       return;
     }
     // TTT:RESET

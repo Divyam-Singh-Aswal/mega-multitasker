@@ -62,13 +62,19 @@ bool    webTurn     = false;
 String  gameStatus  = "Pick your side to start";
 uint8_t tttScoreP1   = 0;
 uint8_t tttScoreP2   = 0;
-uint32_t tttResetTimer    = 0;
+uint32_t tttResetTimer   = 0;   // board auto-reset
+uint32_t tttLeftTimer    = 0;   // left message
 bool     tttPendingReset  = false;
 // series tracking — who picks first
 // 0=not set 1=web is P1 2=mega is P1
 uint8_t tttSeriesP1 = 0;
 char    tttP1Symbol = ' ';
 char    tttWebSymbol_actual = ' ';  // web player's actual symbol this game
+bool     tttDeclinedPending = false;
+uint32_t tttDeclinedTimer   = 0;
+
+bool tttSymbolLocked = false;  // true once first pick received, second pick is blocked
+
 
 //Helpers
     
@@ -84,6 +90,7 @@ void resetBoard() {
   webTurn     = false;
   webSymbol   = ' ';
   megaSymbol  = ' ';
+  tttSymbolLocked  = false;
   gameStatus  = "Pick your side to start";
 }
 
@@ -124,7 +131,8 @@ const char PAGE[] PROGMEM = R"rawhtml(
   .page{display:none;padding:16px;max-width:480px;margin:0 auto}
   .page.show{display:block}
 
-  //  CHAT  
+  /*  CHAT  */
+
   #chatBox{height:340px;overflow-y:auto;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px;scroll-behavior:smooth}
   .bub{max-width:75%;padding:8px 12px;border-radius:14px;font-size:.88rem;line-height:1.4;word-break:break-word}
   .bub.web{align-self:flex-end;background:#1f6feb;color:#fff;border-bottom-right-radius:4px}
@@ -143,7 +151,8 @@ const char PAGE[] PROGMEM = R"rawhtml(
   .btn-gray{background:#21262d;color:#e6edf3;border:1px solid #30363d}
   .btn-gray:hover{background:#30363d}
 
-  //  TTT  
+  /*  TTT  */  
+
   #tttWrap{text-align:center}
   #pickWrap{margin:20px 0}
   #pickWrap p{color:#8b949e;margin-bottom:12px}
@@ -441,7 +450,7 @@ function updateTTTScreens(d) {
     document.getElementById('gameWrap').style.display   = 'none';
     if (d.gameStatus === 'REQUEST_DECLINED') {
       showOnlyInRequest('declinedScreen');
-    } else {
+    } else if (d.gameStatus === 'IDLE' || d.gameStatus === 'Pick your side to start') {
       showOnlyInRequest('idleScreen');
     }
 
@@ -463,8 +472,11 @@ function updateTTTScreens(d) {
     // in game
     document.getElementById('requestWrap').style.display = 'none';
 
+    // if Mega picked first, assign web symbol from server and skip pick screen
+    if (d.megaPickedFirst && d.webSymbolAssigned && d.webSymbolAssigned !== ' ') {
+      mySymbol = d.webSymbolAssigned;
+    }
     if (!mySymbol) {
-      // symbol not picked yet
       document.getElementById('pickWrap').style.display = 'block';
       document.getElementById('gameWrap').style.display = 'none';
     } else {
@@ -583,7 +595,9 @@ void handleState() {
   json += "\"gameActive\":"  + String(gameActive   ? "true" : "false") + ",";
   json += "\"gameStatus\":\"" + gs + "\",";
   json += "\"scoreP1\":"     + String(tttScoreP1) + ",";
-  json += "\"scoreP2\":"     + String(tttScoreP2);
+  json += "\"scoreP2\":"        + String(tttScoreP2) + ",";
+  json += "\"megaPickedFirst\":" + String(tttSymbolLocked && megaSymbol != ' ' && webSymbol != ' ' ? "true" : "false") + ",";
+  json += "\"webSymbolAssigned\":\"" + String(webSymbol) + "\"";
   json += "}";
   server.send(200, "application/json", json);
 
@@ -630,6 +644,7 @@ void handleTTTLeft() {
 }
 
 void handleTTTAccept() {
+  resetBoard();              // clear any stale board state
   webOnlineState = WEB_IN_GAME;
   gameStatus = "REQUEST_ACCEPTED";
   loraSend("MEGA:TTT:REQ:ACCEPT");
@@ -638,7 +653,9 @@ void handleTTTAccept() {
 
 void handleTTTDecline() {
   webOnlineState = WEB_IDLE;
-  gameStatus = "Pick your side to start";
+  gameStatus = "REQUEST_DECLINED";
+  tttDeclinedPending = true;
+  tttDeclinedTimer   = millis();
   loraSend("MEGA:TTT:REQ:DECLINE");
   server.send(200, "text/plain", "ok");
 }
@@ -651,23 +668,25 @@ void handleTTTPick() {
   sym.trim();
   if (sym != "X" && sym != "O") { server.send(400, "text/plain", "bad"); return; }
 
-  webSymbol = sym[0];
+  if (tttSymbolLocked) {
+    // Mega already picked — web gets assigned the remaining symbol, no choice
+    // just start the game, don't override symbols
+    server.send(200, "text/plain", "ok");
+    return;
+  }
+  // Web picked first
+  tttSymbolLocked = true;
+  webSymbol           = sym[0];
   tttWebSymbol_actual = webSymbol;
+  megaSymbol          = (webSymbol == 'X') ? 'O' : 'X';
 
-  // series tracking
   if (tttSeriesP1 == 0) {
-    tttSeriesP1 = 1;        // web picked first — web is P1 for series
+    tttSeriesP1 = 1;   // web is P1 for series
     tttP1Symbol = webSymbol;
   }
-  megaSymbol = (webSymbol == 'X') ? 'O' : 'X';
 
-  resetBoard();
-  webSymbol             = sym[0];
-  tttWebSymbol_actual   = webSymbol;
-  megaSymbol            = (webSymbol == 'X') ? 'O' : 'X';
-  gameActive            = true;
-  // P1's symbol goes first
-  webTurn = (webSymbol == tttP1Symbol);
+  gameActive = true;
+  webTurn    = (webSymbol == tttP1Symbol);
   gameStatus = webTurn ? "Your turn" : "Mega's turn";
 
   String packet = "MEGA:TTT:PICK:" + sym;
@@ -758,9 +777,14 @@ void setup() {
     
 void loop() {
   // clear left message after 2 seconds
-  if (webShowLeftMsg && millis() - tttResetTimer >= 2000UL) {
+  if (webShowLeftMsg && millis() - tttLeftTimer >= 2000UL) {
     webShowLeftMsg = false;
     webOnlineState = WEB_IDLE;
+  }
+  // clear declined message after 2 seconds then show idle
+  if (tttDeclinedPending && millis() - tttDeclinedTimer >= 2000UL) {
+    tttDeclinedPending = false;
+    gameStatus = "IDLE";
   }
   // auto-reset board 1 second after game ends
   if (tttPendingReset && millis() - tttResetTimer >= 1000UL) {
@@ -811,12 +835,16 @@ void loop() {
       } else if (payload == "REQ:DECLINE") {
         webOnlineState = WEB_IDLE;
         gameStatus = "REQUEST_DECLINED";
+        tttDeclinedPending = true;
+        tttDeclinedTimer   = millis();
 
       } else if (payload == "LEFT") {
         webOnlineState = WEB_IDLE;
         resetBoard();
         webShowLeftMsg = true;
+        tttLeftTimer = millis();
         gameStatus = "OPPONENT_LEFT";
+        
 
       } else if (payload == "RESET") {
         resetBoard();
@@ -825,8 +853,15 @@ void loop() {
       } else if (payload.startsWith("PICK:")) {
         char sym = payload[5];
         if (sym == 'X' || sym == 'O') {
-          megaSymbol = sym;
-          webSymbol  = (sym == 'X') ? 'O' : 'X';
+          if (!tttSymbolLocked) {
+            // Mega picked first — assign web the remaining symbol
+            tttSymbolLocked = true;
+            megaSymbol = sym;
+            webSymbol  = (sym == 'X') ? 'O' : 'X';
+            if (tttSeriesP1 == 0) tttSeriesP1 = 2;  // Mega is P1 for series
+            tttP1Symbol = sym;
+          }
+          // whether Mega or web picked first, now start game
           gameActive = true;
           webTurn    = (webSymbol == 'X');
           gameStatus = webTurn ? "Your turn" : "Mega's turn";
